@@ -1,0 +1,14 @@
+defaults:
+  - trainable: mnist
+  - dataset: mnist
+  - _self_
+
+data_loader:
+  worker_count: 0
+  worker_buffer_size: 0
+  num_epochs: null
+
+trainer:
+  num_steps: 100_000
+
+seed: 0

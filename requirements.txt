@@ -1,0 +1,15 @@
+beartype
+black
+dacite
+einops
+equinox
+gcsfs
+grain
+hydra-core
+jax[cuda12]
+jaxtyping
+opencv-python
+optax
+ruff
+tensorflow[cpu]
+tfds-nightly

@@ -1,0 +1,10 @@
+{
+    "configurations": [
+        {
+            "name": "Main",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "video_learning.main"
+        }
+    ]
+}
