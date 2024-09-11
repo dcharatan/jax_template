@@ -6,7 +6,7 @@ from grain.python import RandomAccessDataSource, Transformations
 from jaxtyping import Array, Float
 
 # The following types are a bit awkward. Ideally, we would want a struct-of-arrays
-# annotation that links Example, Batch, and ParallelBatch. See:
+# annotation that links Example and Batch. See:
 # https://github.com/patrick-kidger/jaxtyping/issues/242
 # https://github.com/patrick-kidger/equinox/issues/692
 # https://github.com/patrick-kidger/jaxtyping/issues/84
