@@ -91,7 +91,8 @@ class Trainer(Generic[D]):
             # Save a checkpoint.
             self.save(step, trainable, opt_state, dataset)
 
-            batch = get_typed_sharded_batch(dataset)
+            batch = self.get_batch(dataset)
+            a = 1
 
         # Ensure that the checkpoint at step == num_steps isn't dropped.
         self.save(step + 1, trainable, opt_state, dataset)
@@ -175,3 +176,15 @@ class Trainer(Generic[D]):
             )
 
         return step, trainable, trainable.configure_optimizer(), restored["opt_state"]
+
+    def get_batch(self, dataset: PyGrainDatasetIterator) -> D:
+        """Get the local (per-process) chunk of the batch from the iterator, then
+        combine it with the other processes' chunks to form a sharded global array.
+        """
+        batch = next(dataset)
+        return jax.tree.map(
+            lambda x: jax.make_array_from_process_local_data(
+                get_distributed_sharding(x), x
+            ),
+            batch,
+        )

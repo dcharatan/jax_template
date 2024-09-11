@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Generic, TypeVar
 
 import equinox as eqx
+import numpy as np
 from grain.python import RandomAccessDataSource, Transformations
 from jaxtyping import Array, Float
 
@@ -13,11 +14,11 @@ from jaxtyping import Array, Float
 
 
 class Example(eqx.Module):
-    rgb: Float[Array, "height width 3"]
+    rgb: Float[Array | np.ndarray, "height width 3"]
 
 
 class Batch(eqx.Module):
-    rgb: Float[Array, "batch height width 3"]
+    rgb: Float[Array | np.ndarray, "batch height width 3"]
 
 
 C = TypeVar("C")  # config type

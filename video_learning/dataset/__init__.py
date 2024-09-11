@@ -1,20 +1,24 @@
 from dataclasses import dataclass
 
 import jax
-import numpy as np
 from grain.python import Batch as BatchOperation
 from grain.python import (
     DataLoader,
     IndexSampler,
+    MapTransform,
     PyGrainDatasetIterator,
     ShardOptions,
 )
 
-from ..sharding import get_distributed_sharding
 from .dataset_mnist import DatasetMnist, DatasetMnistCfg
 from .interface import Batch
 
 DatasetCfg = DatasetMnistCfg
+
+
+class ToBatchDataclass(MapTransform):
+    def map(self, element) -> Batch:
+        return Batch(**element)
 
 
 @dataclass
@@ -40,6 +44,7 @@ def get_dataset_iterator(
             data_loader_cfg.per_device_batch_size * jax.local_device_count(),
             True,
         ),
+        ToBatchDataclass(),
     ]
 
     loader = DataLoader(
@@ -60,15 +65,3 @@ def get_dataset_iterator(
         ),
     )
     return iter(loader)
-
-
-def get_typed_sharded_batch(dataset: PyGrainDatasetIterator) -> Batch:
-    """Get a typed batch from the data loader that has been sharded across processes."""
-    per_process_batch = next(dataset)
-    global_batch = jax.tree.map(
-        lambda x: jax.make_array_from_process_local_data(
-            get_distributed_sharding(x), x
-        ),
-        per_process_batch,
-    )
-    return Batch(**global_batch)
