@@ -2,7 +2,8 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 import tensorflow_datasets as tfds
-from grain.python import RandomAccessDataSource, Transformations
+from einops import repeat
+from grain.python import MapTransform, RandomAccessDataSource, Transformations
 
 from .interface import Dataset
 
@@ -17,4 +18,8 @@ class DatasetMnist(Dataset[DatasetMnistCfg]):
         return tfds.data_source("mnist", split="train")
 
     def get_transformations(self) -> Transformations:
-        return []
+        class Convert(MapTransform):
+            def map(self, element):
+                return {"rgb": repeat(element["image"], "h w () -> h w c", c=3)}
+
+        return [Convert()]

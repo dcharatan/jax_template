@@ -4,7 +4,11 @@
             "name": "Main",
             "type": "debugpy",
             "request": "launch",
-            "module": "video_learning.main"
+            "module": "video_learning.main",
+            "env": {
+                "WORKSPACE": "/tmp/workspace",
+            },
+            "justMyCode": true
         }
     ]
 }

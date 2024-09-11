@@ -10,6 +10,7 @@ jax[cuda12]
 jaxtyping
 opencv-python
 optax
+orbax-checkpoint
 ruff
 tensorflow[cpu]
 tfds-nightly

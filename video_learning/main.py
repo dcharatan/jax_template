@@ -1,25 +1,33 @@
+import os
+from pathlib import Path
+
 import jax
 from jaxtyping import install_import_hook
 
 with install_import_hook("video_learning", "beartype.beartype"):
     from .config import get_typed_config
-    from .dataset import get_data_loader
-    from .trainable import get_trainable
-    from .trainer import train
+    from .dataset import get_dataset_iterator
+    from .trainable import get_trainable_type
+    from .trainer import Trainer
 
 
 def main() -> None:
     # Read the configuration.
     cfg = get_typed_config()
 
-    # Set up the model and data loader.
-    trainable = get_trainable(cfg.trainable)
-    loader = get_data_loader(cfg.dataset, cfg.data_loader)
+    # Read the workspace directory.
+    if os.environ.get("WORKSPACE", None) is None:
+        raise ValueError("You must specify the WORKSPACE environment variable.")
+    workspace = Path(os.environ["WORKSPACE"])
 
-    train(
+    trainer = Trainer(
+        cfg.trainer,
+        workspace,
+    )
+    trainer.train(
         jax.random.key(cfg.seed),
-        trainable,
-        loader,
+        lambda: get_trainable_type(cfg.trainable)(cfg.trainable),
+        get_dataset_iterator(cfg.dataset, cfg.data_loader),
     )
 
 
