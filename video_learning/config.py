@@ -9,7 +9,7 @@ from .trainable import TrainableCfg
 from .trainer import TrainerCfg
 
 
-@dataclass
+@dataclass(frozen=True)
 class RootCfg:
     dataset: DatasetCfg
     data_loader: DataLoaderCfg

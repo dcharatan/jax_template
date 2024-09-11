@@ -10,7 +10,7 @@ from ..dataset.interface import Batch
 from ..trainer import Trainable
 
 
-@dataclass
+@dataclass(frozen=True)
 class TrainableMnistCfg:
     name: Literal["mnist"]
 
@@ -22,10 +22,10 @@ class TrainableMnist(Trainable[Batch]):
     def __init__(self, cfg: TrainableMnistCfg) -> None:
         super().__init__()
         self.cfg = cfg
-        self.dummy = jnp.zeros((3, 3))
+        self.dummy = jnp.ones((3, 3))
 
-    def train_step(self, batch: Batch, rng: PRNGKeyArray) -> None:
-        return
+    def train_step(self, batch: Batch, rng: PRNGKeyArray) -> Float[Array, ""]:
+        return (self.dummy**2).mean()
 
     def configure_optimizer(self) -> GradientTransformation:
         return optax.adam(0.001)

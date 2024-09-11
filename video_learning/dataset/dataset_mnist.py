@@ -8,7 +8,7 @@ from grain.python import MapTransform, RandomAccessDataSource, Transformations
 from .interface import Dataset
 
 
-@dataclass
+@dataclass(frozen=True)
 class DatasetMnistCfg:
     name: Literal["mnist"]
 

@@ -7,8 +7,13 @@
             "module": "video_learning.main",
             "env": {
                 "WORKSPACE": "/tmp/workspace",
+                "CUDA_VISIBLE_DEVICES": "3,4",
             },
             "justMyCode": true,
+            "args": [
+                "data_loader.worker_count=0",
+                "data_loader.worker_buffer_size=0",
+            ]
         },
         // Distributed test.
         {
@@ -22,7 +27,7 @@
                 "JAX_DIST_COORDINATOR_ADDRESS": "localhost:3000",
                 "JAX_DIST_NUM_PROCESSES": "2",
                 "JAX_DIST_PROCESS_ID": "0",
-                "CUDA_VISIBLE_DEVICES": "0",
+                "CUDA_VISIBLE_DEVICES": "3",
             },
             "justMyCode": false,
         },
@@ -37,7 +42,7 @@
                 "JAX_DIST_COORDINATOR_ADDRESS": "localhost:3000",
                 "JAX_DIST_NUM_PROCESSES": "2",
                 "JAX_DIST_PROCESS_ID": "1",
-                "CUDA_VISIBLE_DEVICES": "1",
+                "CUDA_VISIBLE_DEVICES": "4",
             },
             "justMyCode": false,
         },

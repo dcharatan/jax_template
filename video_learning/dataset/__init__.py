@@ -2,26 +2,14 @@ from dataclasses import dataclass
 
 import jax
 from grain.python import Batch as BatchOperation
-from grain.python import (
-    DataLoader,
-    IndexSampler,
-    MapTransform,
-    PyGrainDatasetIterator,
-    ShardOptions,
-)
+from grain.python import DataLoader, IndexSampler, PyGrainDatasetIterator, ShardOptions
 
 from .dataset_mnist import DatasetMnist, DatasetMnistCfg
-from .interface import Batch
 
 DatasetCfg = DatasetMnistCfg
 
 
-class ToBatchDataclass(MapTransform):
-    def map(self, element) -> Batch:
-        return Batch(**element)
-
-
-@dataclass
+@dataclass(frozen=True)
 class DataLoaderCfg:
     per_device_batch_size: int
     worker_count: int
@@ -44,7 +32,6 @@ def get_dataset_iterator(
             data_loader_cfg.per_device_batch_size * jax.local_device_count(),
             True,
         ),
-        ToBatchDataclass(),
     ]
 
     loader = DataLoader(

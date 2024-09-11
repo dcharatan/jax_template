@@ -5,8 +5,8 @@ defaults:
 
 data_loader:
   per_device_batch_size: 32
-  worker_count: 0
-  worker_buffer_size: 0
+  worker_count: 8
+  worker_buffer_size: 8
   num_epochs: null
 
 trainer:
