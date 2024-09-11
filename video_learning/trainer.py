@@ -11,8 +11,10 @@ import orbax.checkpoint as ocp
 from grain.python import PyGrainDatasetIterator
 from jaxtyping import PRNGKeyArray
 from optax import GradientTransformation
+from tqdm import trange
 
-from .sharding import get_mesh
+from .dataset import get_typed_sharded_batch
+from .sharding import replicate
 
 
 @dataclass
@@ -48,7 +50,6 @@ class Trainer(Generic[D]):
     ) -> None:
         self.cfg = cfg
         self.workspace = workspace
-        self.mesh = get_mesh()
 
         # Set up the checkpoint manager.
         options = ocp.CheckpointManagerOptions(
@@ -74,7 +75,27 @@ class Trainer(Generic[D]):
             step = 0
             trainable, opt, opt_state = self.init(get_trainable)
 
-        self.save(1000, trainable, opt_state, dataset)
+        # Replicate the parameters and optimizer states on all devices.
+        trainable, opt_state = replicate((trainable, opt_state), mode="put")
+
+        # Main training loop.
+        for step in trange(
+            step,
+            self.cfg.num_steps,
+            initial=step,
+            total=self.cfg.num_steps,
+            desc="Training",
+        ):
+            # Save a checkpoint.
+            self.save(step, trainable, opt_state, dataset)
+
+            batch = get_typed_sharded_batch(dataset)
+            a = 1
+
+        # Ensure that the checkpoint at step == num_steps isn't dropped.
+        self.save(step + 1, trainable, opt_state, dataset)
+
+        # Wait for checkpoints to finish saving before returning.
         self.manager.wait_until_finished()
 
     def init(
@@ -96,6 +117,7 @@ class Trainer(Generic[D]):
         # Avoid unnecessary work.
         if not self.manager.should_save(step):
             return
+        print(f"Saving checkpoint at step {step}.")
 
         # Only save the trainable's parameters (not configuration dataclasses).
         parameters, _ = eqx.partition(trainable, eqx.is_array)

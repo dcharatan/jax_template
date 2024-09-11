@@ -1,6 +1,5 @@
-from dataclasses import dataclass
-from typing import Any, Generic, Protocol, TypeVar
 from abc import ABC, abstractmethod
+from typing import Any, Generic, TypeVar
 
 import equinox as eqx
 from grain.python import RandomAccessDataSource, Transformations
@@ -19,10 +18,6 @@ class Example(eqx.Module):
 
 class Batch(eqx.Module):
     rgb: Float[Array, "batch height width 3"]
-
-
-class ParallelBatch(eqx.Module):
-    rgb: Float[Array, "device batch height width 3"]
 
 
 C = TypeVar("C")  # config type
