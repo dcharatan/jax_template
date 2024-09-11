@@ -14,7 +14,7 @@ from optax import GradientTransformation
 from tqdm import trange
 
 from .dataset import get_typed_sharded_batch
-from .sharding import replicate
+from .sharding import per_process_all_gather_bytes, replicate
 
 
 @dataclass
@@ -68,6 +68,8 @@ class Trainer(Generic[D]):
         get_trainable: Callable[[], Trainable[D]],
         dataset: PyGrainDatasetIterator,
     ) -> None:
+        print("Entering training loop.")
+
         # Attempt to restore the state after preemption.
         try:
             step, trainable, opt, opt_state = self.restore(None, get_trainable, dataset)
@@ -90,7 +92,6 @@ class Trainer(Generic[D]):
             self.save(step, trainable, opt_state, dataset)
 
             batch = get_typed_sharded_batch(dataset)
-            a = 1
 
         # Ensure that the checkpoint at step == num_steps isn't dropped.
         self.save(step + 1, trainable, opt_state, dataset)
@@ -122,14 +123,16 @@ class Trainer(Generic[D]):
         # Only save the trainable's parameters (not configuration dataclasses).
         parameters, _ = eqx.partition(trainable, eqx.is_array)
 
-        # Convert the bytes object provided by PyGrainDatasetIterator.get_state to a
-        # NumPy array for compatibility with Orbax.
-        dataset_state = np.frombuffer(dataset.get_state(), dtype=np.uint8)
+        # Checkpointing the state provided by PyGrainDatasetIterator.get_state is a bit
+        # annoying, since it's provided as a per-process Python bytes object. We need to
+        # all-gather the bytes across processes in order to add them to the checkpoint.
+        dataset_state = per_process_all_gather_bytes(dataset.get_state())
+        dataset_state = [np.frombuffer(x, dtype=np.uint8) for x in dataset_state]
 
         args = ocp.args.Composite(
             parameters=ocp.args.StandardSave(parameters),
             opt_state=ocp.args.StandardSave(opt_state),
-            dataset=ocp.args.ArraySave(dataset_state),
+            dataset=ocp.args.StandardSave(dataset_state),
         )
         self.manager.save(step, args=args)
 
@@ -153,14 +156,22 @@ class Trainer(Generic[D]):
         args = ocp.args.Composite(
             parameters=ocp.args.StandardRestore(parameters),
             opt_state=ocp.args.StandardRestore(opt_state),
-            dataset=ocp.args.ArrayRestore(),
+            dataset=ocp.args.StandardRestore(),
         )
         restored = self.manager.restore(step, args=args)
 
         # Combine the loaded parameters with the static parts of the Trainable.
         trainable: Trainable[D] = eqx.combine(restored["parameters"], static)
 
-        # Restore the dataset iterator's state.
-        dataset.set_state(bytes(restored["dataset"]))
+        # Restore the dataset iterator's state, making sure to grab the state from the
+        # correct process.
+        if len(restored["dataset"]) == jax.process_count():
+            dataset.set_state(bytes(restored["dataset"][jax.process_index()]))
+        else:
+            print(
+                "Cannot restore data loader state because the number of Jax processes "
+                "used to create the checkpoint differs from the current number of Jax "
+                "processes."
+            )
 
         return step, trainable, trainable.configure_optimizer(), restored["opt_state"]

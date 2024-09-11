@@ -8,7 +8,48 @@
             "env": {
                 "WORKSPACE": "/tmp/workspace",
             },
-            "justMyCode": true
+            "justMyCode": true,
+        },
+        // Distributed test.
+        {
+            "name": "Distributed Main (Process 0)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "video_learning.main",
+            "env": {
+                "WORKSPACE": "/tmp/workspace",
+                "JAX_DIST_ENABLED": "true",
+                "JAX_DIST_COORDINATOR_ADDRESS": "localhost:3000",
+                "JAX_DIST_NUM_PROCESSES": "2",
+                "JAX_DIST_PROCESS_ID": "0",
+                "CUDA_VISIBLE_DEVICES": "0",
+            },
+            "justMyCode": false,
+        },
+        {
+            "name": "Distributed Main (Process 1)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "video_learning.main",
+            "env": {
+                "WORKSPACE": "/tmp/workspace",
+                "JAX_DIST_ENABLED": "true",
+                "JAX_DIST_COORDINATOR_ADDRESS": "localhost:3000",
+                "JAX_DIST_NUM_PROCESSES": "2",
+                "JAX_DIST_PROCESS_ID": "1",
+                "CUDA_VISIBLE_DEVICES": "1",
+            },
+            "justMyCode": false,
+        },
+    ],
+    "compounds": [
+        {
+            "name": "Distributed Main",
+            "configurations": [
+                "Distributed Main (Process 0)",
+                "Distributed Main (Process 1)"
+            ],
+            "stopAll": true,
         }
-    ]
+    ],
 }

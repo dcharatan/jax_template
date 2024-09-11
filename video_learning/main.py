@@ -2,6 +2,27 @@ import os
 from pathlib import Path
 
 import jax
+
+if __name__ == "__main__":
+    # On Slurm, the environment variables shouldn't be necessary.
+    print(f"PID: {os.getpid()}")
+
+    def convert(x):
+        return None if x is None else int(x)
+
+    if os.environ.get("JAX_DIST_ENABLED", False):
+        jax.distributed.initialize(
+            coordinator_address=os.environ.get("JAX_DIST_COORDINATOR_ADDRESS", None),
+            num_processes=convert(os.environ.get("JAX_DIST_NUM_PROCESSES", None)),
+            process_id=convert(os.environ.get("JAX_DIST_PROCESS_ID", None)),
+        )
+
+    print(
+        f"Process {jax.process_index()} of {jax.process_count()} controls "
+        f"{jax.local_device_count()} of {jax.device_count()} devices "
+        f"({jax.local_devices()})."
+    )
+
 from jaxtyping import install_import_hook
 
 with install_import_hook("video_learning", "beartype.beartype"):
