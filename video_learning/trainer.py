@@ -1,3 +1,5 @@
+import signal
+import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,8 +15,6 @@ from grain.python import PyGrainDatasetIterator
 from jaxtyping import Array, Float, PRNGKeyArray
 from optax import GradientTransformation
 from tqdm import trange
-
-tf.summary.create_file_writer
 
 from .sharding import (
     filter_device_put,
@@ -106,6 +106,19 @@ class Trainer(Generic[D]):
             step = 0
             trainable, opt, opt_state = self.init(get_trainable)
 
+        # Set up a handler for preemption.
+        def preemption_handler(sig, frame):
+            print("Attempting to exit gracefully.")
+
+            # Save a checkpoint at the current step.
+            self.save(step, trainable, opt_state, dataset, force=True)
+            self.manager.wait_until_finished()
+            print("Saved extra checkpoint.")
+            sys.exit(0)
+
+        signal.signal(signal.SIGINT, preemption_handler)
+        signal.signal(signal.SIGTERM, preemption_handler)
+
         # Get the sharding that will be used for the trainable and opt_state, then use
         # it to replicate the trainable and opt_state across all devices.
         replicated = get_replicated_sharding((trainable, opt_state))
@@ -156,9 +169,10 @@ class Trainer(Generic[D]):
         trainable: Trainable[D],
         opt_state: optax.OptState,
         dataset: PyGrainDatasetIterator,
+        force: bool = False,
     ) -> None:
         # Avoid unnecessary work.
-        if not self.manager.should_save(step):
+        if not (self.manager.should_save(step) or force):
             return
         print(f"Saving checkpoint at step {step}.")
 
@@ -176,7 +190,7 @@ class Trainer(Generic[D]):
             opt_state=ocp.args.StandardSave(opt_state),
             dataset=ocp.args.StandardSave(dataset_state),
         )
-        self.manager.save(step, args=args)
+        self.manager.save(step, args=args, force=force)
 
     def restore(
         self,
