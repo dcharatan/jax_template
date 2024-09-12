@@ -6,6 +6,7 @@ from grain.python import DataLoader, IndexSampler, PyGrainDatasetIterator, Shard
 
 from .dataset_mnist import DatasetMnist, DatasetMnistCfg
 
+# This should be a union of all dataset configuration types.
 DatasetCfg = DatasetMnistCfg
 
 
@@ -21,8 +22,13 @@ def get_dataset_iterator(
     dataset_cfg: DatasetCfg,
     data_loader_cfg: DataLoaderCfg,
 ) -> PyGrainDatasetIterator:
-    dataset = {"mnist": DatasetMnist}[dataset_cfg.name](dataset_cfg)
-    data_source = dataset.get_data_source()
+    # To add a new dataset:
+    # 1. Add it to the dictionary below.
+    # 2. Update DatasetCfg above.
+    dataset = {
+        "mnist": DatasetMnist,
+    }[dataset_cfg.name]
+    data_source = dataset(dataset_cfg).get_data_source()
 
     # Combine the dataset's transformations with two batching operations: one for the
     # on-device batch dimension and one for the per-device batch dimension.
