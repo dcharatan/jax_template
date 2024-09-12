@@ -11,6 +11,7 @@ jaxtyping
 opencv-python
 optax
 orbax-checkpoint
+Pillow
 ruff
 tensorflow[cpu]
 tfds-nightly

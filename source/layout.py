@@ -4,167 +4,147 @@
 - cat/hcat/vcat: Join images by arranging them in a line. If the images have different
   sizes, they are aligned as specified (start, end, center). Allows you to specify a gap
   between images.
-- add_label: Add a label to an image (top left).
+- add_label: Add a label above an image.
 
-Images are assumed to be float32 tensors with shape (channel, height, width).
+Images are assumed to be float32 NumPy arrays with range 0 to 1 and shape
+(*batch, channel, height, width).
 """
 
 from pathlib import Path
 from string import ascii_letters, digits, punctuation
-from typing import Any, Generator, Iterable, Literal, Optional, Union
+from typing import Generator, Iterable, Literal, TypeVar
 
 import numpy as np
-import torch
-import torch.nn.functional as F
-from einops import rearrange
-from jaxtyping import Float
+from einops import reduce
+from jaxtyping import ArrayLike, Float
 from PIL import Image, ImageDraw, ImageFont
-from torch import Tensor
 
 Alignment = Literal["start", "center", "end"]
-Axis = Literal["horizontal", "vertical"]
-Color = Union[
-    int,
-    float,
-    Iterable[int],
-    Iterable[float],
-    Float[Tensor, "#channel"],
-    Float[Tensor, ""],
-]
+Direction = Literal["horizontal", "vertical"]
+Color = Float[ArrayLike, "#channel"]
 
 
 EXPECTED_CHARACTERS = digits + punctuation + ascii_letters
 
-
-def _sanitize_color(color: Color) -> Float[Tensor, "#channel"]:
-    # Convert tensor to list (or individual item).
-    if isinstance(color, torch.Tensor):
-        color = color.tolist()
-
-    # Turn iterators and individual items into lists.
-    if isinstance(color, Iterable):
-        color = list(color)
-    else:
-        color = [color]
-
-    return torch.tensor(color, dtype=torch.float32)
+T = TypeVar("T")
+D = TypeVar("D")
 
 
-def _intersperse(iterable: Iterable, delimiter: Any) -> Generator[Any, None, None]:
-    it = iter(iterable)
-    yield next(it)
-    for item in it:
-        yield delimiter
-        yield item
+def _pad_color(color: Color) -> Float[np.ndarray, "channel 1 1"]:
+    return np.reshape(np.array(color), (-1, 1, 1))
 
 
-def _get_main_dim(main_axis: Axis) -> int:
+def intersperse(iterable: Iterable[T], delimiter: D) -> Generator[T | D, None, None]:
+    try:
+        it = iter(iterable)
+        yield next(it)
+        for item in it:
+            yield delimiter
+            yield item
+    except StopIteration:
+        return
+
+
+def direction_to_axis(direction: Direction) -> Literal[-1, -2]:
     return {
-        "horizontal": 2,
-        "vertical": 1,
-    }[main_axis]
+        "horizontal": -1,
+        "vertical": -2,
+    }[direction]
 
 
-def _get_cross_dim(main_axis: Axis) -> int:
-    return {
-        "horizontal": 1,
-        "vertical": 2,
-    }[main_axis]
+def pad(
+    image: Float[np.ndarray, "*batch original_height original_width channel"],
+    direction: Direction,
+    align: Alignment,
+    target: int,
+    color: Color,
+) -> Float[np.ndarray, "*batch padded_height padded_width channel"]:
+    """Pad the image to the desired length on the target axis."""
 
-
-def _compute_offset(base: int, overlay: int, align: Alignment) -> slice:
-    assert base >= overlay
-    offset = {
+    axis = direction_to_axis(direction)
+    delta = target - image.shape[axis]
+    before = {
         "start": 0,
-        "center": (base - overlay) // 2,
-        "end": base - overlay,
+        "center": delta // 2,
+        "end": delta,
     }[align]
-    return slice(offset, offset + overlay)
 
+    # Create an image with the padded shape and desired color.
+    padded_shape = list(image.shape)
+    padded_shape[axis] = target
+    padded_image = np.empty(padded_shape, dtype=image.dtype)
+    padded_image[:] = _pad_color(color)
 
-def overlay(
-    base: Float[Tensor, "channel base_height base_width"],
-    overlay: Float[Tensor, "channel overlay_height overlay_width"],
-    main_axis: Axis,
-    main_axis_alignment: Alignment,
-    cross_axis_alignment: Alignment,
-) -> Float[Tensor, "channel base_height base_width"]:
-    # The overlay must be smaller than the base.
-    _, base_height, base_width = base.shape
-    _, overlay_height, overlay_width = overlay.shape
-    assert base_height >= overlay_height and base_width >= overlay_width
+    # Insert the original image into the padded image at the correct location.
+    selector = [slice(None, None) for _ in padded_shape]
+    selector[axis] = slice(before, before + image.shape[axis])
+    padded_image[tuple(selector)] = image
 
-    # Compute spacing on the main dimension.
-    main_dim = _get_main_dim(main_axis)
-    main_slice = _compute_offset(
-        base.shape[main_dim], overlay.shape[main_dim], main_axis_alignment
-    )
-
-    # Compute spacing on the cross dimension.
-    cross_dim = _get_cross_dim(main_axis)
-    cross_slice = _compute_offset(
-        base.shape[cross_dim], overlay.shape[cross_dim], cross_axis_alignment
-    )
-
-    # Combine the slices and paste the overlay onto the base accordingly.
-    selector = [..., None, None]
-    selector[main_dim] = main_slice
-    selector[cross_dim] = cross_slice
-    result = base.clone()
-    result[selector] = overlay
-    return result
+    return padded_image
 
 
 def cat(
-    main_axis: Axis,
-    *images: Iterable[Float[Tensor, "channel _ _"]],
+    images: Iterable[Float[np.ndarray, "*#batch #channel _ _"]],
+    direction: Direction,
     align: Alignment = "center",
     gap: int = 8,
-    gap_color: Color = 1,
-) -> Float[Tensor, "channel height width"]:
+    color: Color = 1,
+    border: int = 0,
+) -> Float[np.ndarray, "*batch channel height width"]:
     """Arrange images in a line. The interface resembles a CSS div with flexbox."""
-    device = images[0].device
-    gap_color = _sanitize_color(gap_color).to(device)
 
-    # Find the maximum image side length in the cross axis dimension.
-    cross_dim = _get_cross_dim(main_axis)
-    cross_axis_length = max(image.shape[cross_dim] for image in images)
+    # Ensure that there's at least one image.
+    images = list(images)
+    assert images
 
-    # Pad the images.
-    padded_images = []
-    for image in images:
-        # Create an empty image with the correct size.
-        padded_shape = list(image.shape)
-        padded_shape[cross_dim] = cross_axis_length
-        base = torch.ones(padded_shape, dtype=torch.float32, device=device)
-        base = base * gap_color[:, None, None]
-        padded_images.append(overlay(base, image, main_axis, "start", align))
+    # Find the axis and cross axis.
+    axis = direction_to_axis(direction)
+    cross_direction = {
+        "horizontal": "vertical",
+        "vertical": "horizontal",
+    }[direction]
+    cross_axis = direction_to_axis(cross_direction)
 
-    # Intersperse separators if necessary.
+    # Pad the images along the cross axis.
+    target = max(image.shape[cross_axis] for image in images)
+    images = [pad(image, cross_direction, align, target, color) for image in images]
+
+    # Intersperse separators to create gaps.
     if gap > 0:
-        # Generate a separator.
-        c, _, _ = images[0].shape
-        separator_size = [gap, gap]
-        separator_size[cross_dim - 1] = cross_axis_length
-        separator = torch.ones((c, *separator_size), dtype=torch.float32, device=device)
-        separator = separator * gap_color[:, None, None]
+        # Create a separator with the desired size.
+        *_, channel, _, _ = images[0].shape
+        separator_shape = [channel, gap, gap]
+        separator_shape[cross_axis] = target
+        separator = np.empty(separator_shape, dtype=images[0].dtype)
+        separator[:] = _pad_color(color)
 
-        # Intersperse the separator between the images.
-        padded_images = list(_intersperse(padded_images, separator))
+        # Insert the separator.
+        images = list(intersperse(images, separator))
 
-    return torch.cat(padded_images, dim=_get_main_dim(main_axis))
+    # Broadcast and concatenate the images.
+    broad = [image.shape[:-2] for image in images]
+    broad = np.broadcast_shapes(*broad)
+    images = [np.broadcast_to(image, (*broad, *image.shape[-2:])) for image in images]
+    images = np.concatenate(images, axis=axis)
+
+    # Add a border if desired.
+    if border > 0:
+        images = add_border(images, border, color)
+
+    return images
 
 
 def hcat(
-    *images: Iterable[Float[Tensor, "channel _ _"]],
+    images: Iterable[Float[np.ndarray, "*#batch #channel _ _"]],
     align: Literal["start", "center", "end", "top", "bottom"] = "start",
     gap: int = 8,
-    gap_color: Color = 1,
-):
-    """Shorthand for a horizontal linear concatenation."""
+    color: Color = 1,
+    border: int = 0,
+) -> Float[np.ndarray, "*batch channel height width"]:
+    """Shorthand for horizontal concatenation."""
     return cat(
+        images,
         "horizontal",
-        *images,
         align={
             "start": "start",
             "center": "center",
@@ -173,20 +153,22 @@ def hcat(
             "bottom": "end",
         }[align],
         gap=gap,
-        gap_color=gap_color,
+        color=color,
+        border=border,
     )
 
 
 def vcat(
-    *images: Iterable[Float[Tensor, "channel _ _"]],
+    images: Iterable[Float[np.ndarray, "*#batch #channel _ _"]],
     align: Literal["start", "center", "end", "left", "right"] = "start",
     gap: int = 8,
-    gap_color: Color = 1,
-):
-    """Shorthand for a horizontal linear concatenation."""
+    color: Color = 1,
+    border: int = 0,
+) -> Float[np.ndarray, "*batch channel height width"]:
+    """Shorthand for vertical concatenation."""
     return cat(
+        images,
         "vertical",
-        *images,
         align={
             "start": "start",
             "center": "center",
@@ -195,55 +177,36 @@ def vcat(
             "right": "end",
         }[align],
         gap=gap,
-        gap_color=gap_color,
+        color=color,
+        border=border,
     )
 
 
 def add_border(
-    image: Float[Tensor, "channel height width"],
+    image: Float[np.ndarray, "*batch channel height width"],
     border: int = 8,
     color: Color = 1,
-) -> Float[Tensor, "channel new_height new_width"]:
-    color = _sanitize_color(color).to(image)
-    c, h, w = image.shape
-    result = torch.empty(
-        (c, h + 2 * border, w + 2 * border), dtype=torch.float32, device=image.device
-    )
-    result[:] = color[:, None, None]
-    result[:, border : h + border, border : w + border] = image
-    return result
+) -> Float[np.ndarray, "*batch channel new_height new_width"]:
+    """Add a border to the image."""
+    *batch, channel, height, width = image.shape
 
+    # Create an empty larger image with the border color.
+    padded_shape = (*batch, channel, height + 2 * border, width + 2 * border)
+    padded_image = np.empty(padded_shape, dtype=image.dtype)
+    padded_image[:] = _pad_color(color)
 
-def resize(
-    image: Float[Tensor, "channel height width"],
-    shape: Optional[tuple[int, int]] = None,
-    width: Optional[int] = None,
-    height: Optional[int] = None,
-) -> Float[Tensor, "channel new_height new_width"]:
-    assert (shape is not None) + (width is not None) + (height is not None) == 1
-    _, h, w = image.shape
+    # Paste the original image intot he padded image.
+    padded_image[..., border : border + height, border : border + width] = image
 
-    if width is not None:
-        shape = (int(h * width / w), width)
-    elif height is not None:
-        shape = (height, int(w * height / h))
-
-    return F.interpolate(
-        image[None],
-        shape,
-        mode="bilinear",
-        align_corners=False,
-        antialias="bilinear",
-    )[0]
+    return padded_image
 
 
 def draw_label(
     text: str,
     font: Path,
     font_size: int,
-    device: torch.device = torch.device("cpu"),
-) -> Float[Tensor, "3 height width"]:
-    """Draw a black label on a white background with no border."""
+) -> Float[np.ndarray, "height width"]:
+    """Draw a monochrome white label on a black background with no border."""
     try:
         font = ImageFont.truetype(str(font), font_size)
     except OSError:
@@ -252,22 +215,22 @@ def draw_label(
     width = right - left
     _, top, _, bottom = font.getbbox(EXPECTED_CHARACTERS)
     height = bottom - top
-    image = Image.new("RGB", (width, height), color="white")
+    image = Image.new("RGB", (width, height), color="black")
     draw = ImageDraw.Draw(image)
-    draw.text((0, 0), text, font=font, fill="black")
-    image = torch.tensor(np.array(image) / 255, dtype=torch.float32, device=device)
-    return rearrange(image, "h w c -> c h w")
+    draw.text((0, 0), text, font=font, fill="white")
+    return reduce(np.array(image, dtype=np.float32) / 255, "h w c -> h w", "mean")
 
 
 def add_label(
-    image: Float[Tensor, "3 width height"],
+    image: Float[np.ndarray, "*batch channel width height"],
     label: str,
     font: Path = Path("assets/Inter-Regular.otf"),
     font_size: int = 24,
-) -> Float[Tensor, "3 width_with_label height_with_label"]:
-    return vcat(
-        draw_label(label, font, font_size, image.device),
-        image,
-        align="left",
-        gap=4,
-    )
+    font_color: Color = 0,
+    background: Color = 1,
+    gap: int = 4,
+    align: Alignment = "left",
+) -> Float[np.ndarray, "*batch channel width_with_label height_with_label"]:
+    label = draw_label(label, font, font_size)
+    label = label * _pad_color(font_color) + (1 - label) * _pad_color(background)
+    return vcat((label, image), align=align, gap=gap)
