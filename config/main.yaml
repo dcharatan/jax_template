@@ -11,6 +11,7 @@ data_loader:
 
 trainer:
   num_steps: 100_000
+  on_existing_workspace: restore
   checkpointing:
     save_interval_steps: 1000
     max_to_keep: 3

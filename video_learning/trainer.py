@@ -1,9 +1,10 @@
+import shutil
 import signal
 import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Generic, TypeVar
+from typing import Callable, Generic, Literal, TypeVar
 
 import equinox as eqx
 import jax
@@ -34,14 +35,15 @@ class CheckpointingCfg:
 class TrainerCfg:
     num_steps: int
     checkpointing: CheckpointingCfg
+    on_existing_workspace: Literal["restore", "overwrite", "throw"]
 
 
-D = TypeVar("D")  # data type
+B = TypeVar("B")  # batch type
 
 
-class Trainable(eqx.Module, Generic[D], ABC):
+class Trainable(eqx.Module, Generic[B], ABC):
     @abstractmethod
-    def train_step(self, batch: D, rng: PRNGKeyArray) -> Float[Array, ""]:
+    def train_step(self, batch: B, rng: PRNGKeyArray) -> Float[Array, ""]:
         pass
 
     @abstractmethod
@@ -50,8 +52,8 @@ class Trainable(eqx.Module, Generic[D], ABC):
 
 
 def compute_loss(
-    trainable: Trainable[D],
-    batch: D,
+    trainable: Trainable[B],
+    batch: B,
     rng: PRNGKeyArray,
 ) -> Float[Array, ""]:
     return trainable.train_step(batch, rng)
@@ -59,25 +61,26 @@ def compute_loss(
 
 @eqx.filter_jit(donate="all")
 def train_step(
-    trainable: Trainable[D],
+    trainable: Trainable[B],
     opt_state: optax.OptState,
-    batch: D,
+    batch: B,
     rng: PRNGKeyArray,
     opt: optax.GradientTransformation,
-) -> tuple[Trainable[D], optax.OptState, Float[Array, ""]]:
+) -> tuple[Trainable[B], optax.OptState, Float[Array, ""]]:
     loss, grads = eqx.filter_value_and_grad(compute_loss)(trainable, batch, rng)
     updates, opt_state = opt.update(grads, opt_state)
     trainable = eqx.apply_updates(trainable, updates)
     return trainable, opt_state, loss
 
 
-class Trainer(Generic[D]):
+class Trainer(Generic[B]):
     def __init__(
         self,
         cfg: TrainerCfg,
         workspace: Path,
     ) -> None:
         self.cfg = cfg
+        self.workspace = workspace
         self.writer = tf.summary.create_file_writer(str(workspace / "tensorboard"))
 
         # Set up the checkpoint manager.
@@ -94,17 +97,14 @@ class Trainer(Generic[D]):
     def train(
         self,
         rng: PRNGKeyArray,
-        get_trainable: Callable[[], Trainable[D]],
+        get_trainable: Callable[[], Trainable[B]],
         dataset: PyGrainDatasetIterator,
     ) -> None:
         print("Entering training loop.")
-
-        # Attempt to restore the state after preemption.
-        try:
-            step, trainable, opt, opt_state = self.restore(None, get_trainable, dataset)
-        except FileNotFoundError:
-            step = 0
-            trainable, opt, opt_state = self.init(get_trainable)
+        step, trainable, opt, opt_state = self.init_or_handle_existing_workspace(
+            get_trainable,
+            dataset,
+        )
 
         # Set up a handler for preemption.
         def preemption_handler(sig, frame):
@@ -156,17 +156,17 @@ class Trainer(Generic[D]):
 
     def init(
         self,
-        get_trainable: Callable[[], Trainable[D]],
-    ) -> tuple[Trainable[D], optax.GradientTransformation, optax.OptState]:
+        get_trainable: Callable[[], Trainable[B]],
+    ) -> tuple[Trainable[B], optax.GradientTransformation, optax.OptState]:
         trainable = get_trainable()
         opt = trainable.configure_optimizer()
-        opt_state = opt.init(eqx.filter(trainable, eqx.is_array))
+        opt_state = opt.init(eqx.filter(trainable, eqx.is_inexact_array))
         return trainable, opt, opt_state
 
     def save(
         self,
         step: int,
-        trainable: Trainable[D],
+        trainable: Trainable[B],
         opt_state: optax.OptState,
         dataset: PyGrainDatasetIterator,
         force: bool = False,
@@ -195,9 +195,9 @@ class Trainer(Generic[D]):
     def restore(
         self,
         step: int | None,
-        get_trainable: Callable[[], Trainable[D]],
+        get_trainable: Callable[[], Trainable[B]],
         dataset: PyGrainDatasetIterator,
-    ) -> tuple[int, Trainable[D], optax.GradientTransformation, optax.OptState]:
+    ) -> tuple[int, Trainable[B], optax.GradientTransformation, optax.OptState]:
         if step is None:
             step = self.manager.latest_step()
 
@@ -217,7 +217,7 @@ class Trainer(Generic[D]):
         restored = self.manager.restore(step, args=args)
 
         # Combine the loaded parameters with the static parts of the Trainable.
-        trainable: Trainable[D] = eqx.combine(restored["parameters"], static)
+        trainable: Trainable[B] = eqx.combine(restored["parameters"], static)
 
         # Restore the dataset iterator's state, making sure to grab the state from the
         # correct process.
@@ -238,7 +238,29 @@ class Trainer(Generic[D]):
 
         return step, trainable, trainable.configure_optimizer(), restored["opt_state"]
 
-    def get_batch(self, dataset: PyGrainDatasetIterator) -> D:
+    def init_or_handle_existing_workspace(
+        self,
+        get_trainable: Callable[[], Trainable[B]],
+        dataset: PyGrainDatasetIterator,
+    ) -> tuple[int, Trainable[B], optax.GradientTransformation, optax.OptState]:
+        """Based on self.cfg.on_existing_workspace, handle initialization."""
+        if self.cfg.on_existing_workspace == "throw" and self.workspace.exists():
+            # In "throw" mode, throw an exception if the workspace already exists.
+            raise Exception("Workspace already exists!")
+        elif self.cfg.on_existing_workspace == "overwrite":
+            # In "overwrite" mode, delete the workspace if it already exists.
+            shutil.rmtree(self.workspace, True)
+        elif self.cfg.on_existing_workspace == "restore":
+            # In "restore" mode, attempt to load the workspace's latest checkpoint if it
+            # already exists. Otherwise, initialize as usual.
+            try:
+                return self.restore(None, get_trainable, dataset)
+            except FileNotFoundError:
+                # This will fall through to regular initialization.
+                pass
+        return 0, *self.init(get_trainable)
+
+    def get_batch(self, dataset: PyGrainDatasetIterator) -> B:
         """Get the local (per-process) chunk of the batch from the iterator, then
         combine it with the other processes' chunks to form a sharded global array.
         """

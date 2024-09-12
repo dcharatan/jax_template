@@ -20,6 +20,9 @@ class DatasetMnist(Dataset[DatasetMnistCfg]):
     def get_transformations(self) -> Transformations:
         class Convert(MapTransform):
             def map(self, element):
-                return {"rgb": repeat(element["image"] / 255, "h w () -> h w c", c=3)}
+                return {
+                    "rgb": repeat(element["image"] / 255, "h w () -> c h w", c=3),
+                    "label": element["label"],
+                }
 
         return [Convert()]

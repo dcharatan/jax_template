@@ -45,9 +45,11 @@ def main() -> None:
         cfg.trainer,
         workspace,
     )
+    rng = jax.random.key(cfg.seed)
+    trainer_rng, init_rng = jax.random.split(rng)
     trainer.train(
-        jax.random.key(cfg.seed),
-        lambda: get_trainable_type(cfg.trainable)(cfg.trainable),
+        trainer_rng,
+        lambda: get_trainable_type(cfg.trainable)(cfg.trainable, init_rng),
         get_dataset_iterator(cfg.dataset, cfg.data_loader),
     )
 
