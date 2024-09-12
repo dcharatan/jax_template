@@ -48,7 +48,7 @@ def get_distributed_sharding(tree: PyTree) -> PyTree[jax.sharding.NamedSharding 
     other axes.
     """
 
-    def _get_distributed_sharding(x: Any) -> jax.sharding.NamedSharding:
+    def _get_distributed_sharding(x: Any) -> jax.sharding.NamedSharding | None:
         ndim = get_ndim(x)
         if ndim is None:
             return None
@@ -62,7 +62,7 @@ def get_distributed_sharding(tree: PyTree) -> PyTree[jax.sharding.NamedSharding 
 def get_replicated_sharding(tree: PyTree) -> PyTree[jax.sharding.NamedSharding | None]:
     """Create a sharding that replicates along all axes."""
 
-    def _get_replicated_sharding(x: Any) -> jax.sharding.NamedSharding:
+    def _get_replicated_sharding(x: Any) -> jax.sharding.NamedSharding | None:
         ndim = get_ndim(x)
         if ndim is None:
             return None

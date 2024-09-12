@@ -25,7 +25,7 @@ if __name__ == "__main__":
 
 from jaxtyping import install_import_hook
 
-with install_import_hook("video_learning", "beartype.beartype"):
+with install_import_hook("source", "beartype.beartype"):
     from source.config import get_typed_config
     from source.dataset import get_dataset_iterator
     from source.trainable import get_trainable_type
