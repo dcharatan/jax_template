@@ -18,6 +18,7 @@ from optax import GradientTransformation
 from tqdm import trange
 
 from .sharding import (
+    filter_add_sharding_to_shape_dtype_struct,
     filter_device_put,
     get_distributed_sharding,
     get_replicated_sharding,
@@ -107,14 +108,20 @@ class Trainer(Generic[B]):
         )
 
         # Set up a handler for preemption.
-        def preemption_handler(sig, frame):
-            print("Attempting to exit gracefully.")
+        preempted = False
 
-            # Save a checkpoint at the current step.
-            self.save(step, trainable, opt_state, dataset, force=True)
-            self.manager.wait_until_finished()
-            print("Saved extra checkpoint.")
-            sys.exit(0)
+        def preemption_handler(sig, frame):
+            nonlocal preempted
+            print("Attempting to exit gracefully.")
+            preempted = True
+
+        def exit_if_preempted():
+            if preempted:
+                # Save a checkpoint at the current step, then exit gracefully.
+                self.save(step, trainable, opt_state, dataset, force=True)
+                self.manager.wait_until_finished()
+                print("Exiting gracefully.")
+                sys.exit(0)
 
         signal.signal(signal.SIGINT, preemption_handler)
         signal.signal(signal.SIGTERM, preemption_handler)
@@ -124,7 +131,7 @@ class Trainer(Generic[B]):
         replicated = get_replicated_sharding((trainable, opt_state))
         trainable, opt_state = filter_device_put((trainable, opt_state), replicated)
 
-        # Main training loop.
+        # Main training loop. Exit before long-running operations if preempted.
         for step in trange(
             step,
             self.cfg.num_steps,
@@ -133,8 +140,14 @@ class Trainer(Generic[B]):
             desc="Training",
         ):
             step_rng = jax.random.fold_in(rng, step)
+
+            exit_if_preempted()
             self.save(step, trainable, opt_state, dataset)
+
+            exit_if_preempted()
             batch = self.get_batch(dataset)
+
+            exit_if_preempted()
             trainable, opt_state, loss = train_step(
                 trainable,
                 opt_state,
@@ -144,6 +157,7 @@ class Trainer(Generic[B]):
             )
 
             # Write the loss, but only from one process.
+            exit_if_preempted()
             if jax.process_index() == 0:
                 with self.writer.as_default():
                     tf.summary.scalar("loss", loss.item(), step=step)
@@ -206,6 +220,15 @@ class Trainer(Generic[B]):
         trainable, _, opt_state = eqx.filter_eval_shape(self.init, get_trainable)
         parameters, static = eqx.partition(
             trainable, lambda x: isinstance(x, jax.ShapeDtypeStruct)
+        )
+
+        # Give the parameters and opt_state (which are ShapeDtypeStruct) the correct
+        # sharding.
+        parameters = filter_add_sharding_to_shape_dtype_struct(
+            parameters, get_replicated_sharding(parameters)
+        )
+        opt_state = filter_add_sharding_to_shape_dtype_struct(
+            opt_state, get_replicated_sharding(opt_state)
         )
 
         # Use Orbax to load the parameters, optimizer state, and dataset state.
