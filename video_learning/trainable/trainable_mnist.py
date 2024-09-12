@@ -61,6 +61,8 @@ class TrainableMnist(Trainable[Batch]):
         self.model = CNN(rng)
 
     def train_step(self, batch: Batch, rng: PRNGKeyArray) -> Float[Array, ""]:
+        # In Equinox, layers/models are assumed to use scalar types, so vmap is
+        # necessary here.
         pred_y = jax.vmap(self.model)(batch["rgb"])
 
         def cross_entropy(
