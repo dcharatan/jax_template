@@ -28,7 +28,9 @@ def get_dataset_iterator(
     dataset = {
         "mnist": DatasetMnist,
     }[dataset_cfg.name]
-    data_source = dataset(dataset_cfg).get_data_source()
+
+    dataset = dataset(dataset_cfg)
+    data_source = dataset.get_data_source()
 
     # Combine the dataset's transformations with two batching operations: one for the
     # on-device batch dimension and one for the per-device batch dimension.

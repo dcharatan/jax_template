@@ -18,18 +18,18 @@ if __name__ == "__main__":
         )
 
     print(
-        f"Process {jax.process_index()} of {jax.process_count()} controls "
-        f"{jax.local_device_count()} of {jax.device_count()} devices "
-        f"({jax.local_devices()})."
+        f"Process index {jax.process_index()} controls {jax.local_device_count()} "
+        f"device(s) ({jax.local_devices()}). Total: {jax.process_count()} process(es) "
+        f"and {jax.device_count()} device(s)"
     )
 
 from jaxtyping import install_import_hook
 
 with install_import_hook("video_learning", "beartype.beartype"):
-    from .config import get_typed_config
-    from .dataset import get_dataset_iterator
-    from .trainable import get_trainable_type
-    from .trainer import Trainer
+    from source.config import get_typed_config
+    from source.dataset import get_dataset_iterator
+    from source.trainable import get_trainable_type
+    from source.trainer import Trainer
 
 
 def main() -> None:

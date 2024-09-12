@@ -4,7 +4,7 @@
             "name": "Main",
             "type": "debugpy",
             "request": "launch",
-            "module": "video_learning.main",
+            "module": "main",
             "env": {
                 "WORKSPACE": "/tmp/workspace",
                 "CUDA_VISIBLE_DEVICES": "3,4",
@@ -21,7 +21,7 @@
             "name": "Distributed Main (Process 0)",
             "type": "debugpy",
             "request": "launch",
-            "module": "video_learning.main",
+            "module": "main",
             "env": {
                 "WORKSPACE": "/tmp/workspace",
                 "JAX_DIST_ENABLED": "true",
@@ -36,7 +36,7 @@
             "name": "Distributed Main (Process 1)",
             "type": "debugpy",
             "request": "launch",
-            "module": "video_learning.main",
+            "module": "main",
             "env": {
                 "WORKSPACE": "/tmp/workspace",
                 "JAX_DIST_ENABLED": "true",

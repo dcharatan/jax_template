@@ -2,9 +2,24 @@
 
 This is a template for training neural networks with Jax.
 
+## Environment Setup
+
+```bash
+python3.11 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+You should probably update your CUDA Toolkit version and Nvidia driver to the latest version before creating your environment.
+
 ## Running the Code
 
-See `.vscode/launch.json` for examples.
+See `.vscode/launch.json` for examples. Alternatively, run:
+
+```bash
+WORKSPACE=/tmp/workspace python3 -m main
+```
 
 ## Dependencies
 
