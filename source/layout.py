@@ -16,12 +16,14 @@ from typing import Generator, Iterable, Literal, TypeVar
 
 import numpy as np
 from einops import reduce
-from jaxtyping import ArrayLike, Float
+from jaxtyping import Float, Int
 from PIL import Image, ImageDraw, ImageFont
 
-Alignment = Literal["start", "center", "end"]
-Direction = Literal["horizontal", "vertical"]
-Color = Float[ArrayLike, "#channel"]
+type Alignment = Literal["start", "center", "end"]
+type Direction = Literal["horizontal", "vertical"]
+type Color = Float[np.ndarray | list, "#channel"] | Int[
+    np.ndarray | list, "#channel"
+] | float | int
 
 
 EXPECTED_CHARACTERS = digits + punctuation + ascii_letters
@@ -30,8 +32,8 @@ T = TypeVar("T")
 D = TypeVar("D")
 
 
-def _pad_color(color: Color) -> Float[np.ndarray, "channel 1 1"]:
-    return np.reshape(np.array(color), (-1, 1, 1))
+def _pad_color(color: Color) -> Float[np.ndarray, "#channel 1 1"]:
+    return np.reshape(np.array(color, dtype=np.float32), (-1, 1, 1))
 
 
 def intersperse(iterable: Iterable[T], delimiter: D) -> Generator[T | D, None, None]:
@@ -53,12 +55,12 @@ def direction_to_axis(direction: Direction) -> Literal[-1, -2]:
 
 
 def pad(
-    image: Float[np.ndarray, "*batch original_height original_width channel"],
+    image: Float[np.ndarray, "*batch channel original_height original_width"],
     direction: Direction,
     align: Alignment,
     target: int,
     color: Color,
-) -> Float[np.ndarray, "*batch padded_height padded_width channel"]:
+) -> Float[np.ndarray, "*batch channel padded_height padded_width"]:
     """Pad the image to the desired length on the target axis."""
 
     axis = direction_to_axis(direction)
@@ -230,7 +232,8 @@ def add_label(
     background: Color = 1,
     gap: int = 4,
     align: Alignment = "left",
+    border: int = 0,
 ) -> Float[np.ndarray, "*batch channel width_with_label height_with_label"]:
     label = draw_label(label, font, font_size)
     label = label * _pad_color(font_color) + (1 - label) * _pad_color(background)
-    return vcat((label, image), align=align, gap=gap)
+    return vcat((label, image), align=align, gap=gap, color=background, border=border)
