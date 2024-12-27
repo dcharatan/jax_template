@@ -7,7 +7,7 @@
             "module": "main",
             "env": {
                 "WORKSPACE": "/tmp/workspace",
-                "CUDA_VISIBLE_DEVICES": "3,4",
+                "CUDA_VISIBLE_DEVICES": "0",
             },
             "justMyCode": true,
             "args": [
@@ -28,7 +28,7 @@
                 "JAX_DIST_COORDINATOR_ADDRESS": "localhost:3000",
                 "JAX_DIST_NUM_PROCESSES": "2",
                 "JAX_DIST_PROCESS_ID": "0",
-                "CUDA_VISIBLE_DEVICES": "3",
+                "CUDA_VISIBLE_DEVICES": "0",
             },
             "justMyCode": false,
         },
@@ -43,7 +43,7 @@
                 "JAX_DIST_COORDINATOR_ADDRESS": "localhost:3000",
                 "JAX_DIST_NUM_PROCESSES": "2",
                 "JAX_DIST_PROCESS_ID": "1",
-                "CUDA_VISIBLE_DEVICES": "4",
+                "CUDA_VISIBLE_DEVICES": "1",
             },
             "justMyCode": false,
         },
