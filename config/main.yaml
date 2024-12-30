@@ -16,5 +16,6 @@ trainer:
   checkpointing:
     save_interval_steps: 1000
     max_to_keep: 3
+    load_dataset_state: false
 
 seed: 0

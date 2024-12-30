@@ -9,11 +9,14 @@ from typing import Callable, Generic, Literal, TypeVar
 
 import equinox as eqx
 import jax
-import numpy as np
 import optax
 import orbax.checkpoint as ocp
 import tensorflow as tf
-from grain.python import PyGrainDatasetIterator
+from grain.python import (
+    PyGrainCheckpointRestore,
+    PyGrainCheckpointSave,
+    PyGrainDatasetIterator,
+)
 from jaxtyping import Array, Float, PRNGKeyArray
 from optax import GradientTransformation
 
@@ -22,7 +25,6 @@ from .sharding import (
     filter_device_put,
     get_distributed_sharding,
     get_replicated_sharding,
-    per_process_all_gather_bytes,
 )
 from .timer import Timer
 
@@ -31,6 +33,7 @@ from .timer import Timer
 class CheckpointingCfg:
     save_interval_steps: int
     max_to_keep: int
+    load_dataset_state: bool
 
 
 @dataclass(frozen=True)
@@ -91,11 +94,13 @@ class Trainer(Generic[B]):
             save_interval_steps=cfg.checkpointing.save_interval_steps,
             max_to_keep=cfg.checkpointing.max_to_keep,
         )
+        checkpoint_dir = workspace / "checkpoints"
         self.manager = ocp.CheckpointManager(
-            workspace / "checkpoints",
+            checkpoint_dir,
             options=options,
             item_names=("parameters", "opt_state", "dataset"),
         )
+        checkpoint_dir.mkdir(exist_ok=True, parents=True)
 
     def train(
         self,
@@ -197,18 +202,11 @@ class Trainer(Generic[B]):
         # Only save the trainable's parameters (not configuration dataclasses).
         parameters, _ = eqx.partition(trainable, eqx.is_array)
 
-        # Checkpointing the state provided by PyGrainDatasetIterator.get_state is a bit
-        # annoying, since it's provided as a per-process Python bytes object. We need to
-        # all-gather the bytes across processes in order to add them to the checkpoint.
-        dataset_state = per_process_all_gather_bytes(dataset.get_state())
-        dataset_state = [np.frombuffer(x, dtype=np.uint8) for x in dataset_state]
-
         args = ocp.args.Composite(
             parameters=ocp.args.StandardSave(parameters),
             opt_state=ocp.args.StandardSave(opt_state),
-            dataset=ocp.args.StandardSave(dataset_state),
+            dataset=PyGrainCheckpointSave(dataset),
         )
-        self.manager.directory.mkdir(exist_ok=True, parents=True)
         self.manager.save(step, args=args, force=force)
 
     def restore(
@@ -236,33 +234,19 @@ class Trainer(Generic[B]):
             opt_state, get_replicated_sharding(opt_state)
         )
 
-        # Use Orbax to load the parameters, optimizer state, and dataset state.
-        args = ocp.args.Composite(
+        # Use Orbax to load the parameters and optimizer state. The dataset state can be
+        # loaded too, but is optionally skipped because any particular dataset state is
+        # only compatible with a specific number of training processes.
+        args = dict(
             parameters=ocp.args.StandardRestore(parameters),
             opt_state=ocp.args.StandardRestore(opt_state),
-            dataset=ocp.args.StandardRestore(),
         )
-        restored = self.manager.restore(step, args=args)
+        if self.cfg.checkpointing.load_dataset_state:
+            args["dataset"] = PyGrainCheckpointRestore(dataset)
+        restored = self.manager.restore(step, args=ocp.args.Composite(**args))
 
         # Combine the loaded parameters with the static parts of the Trainable.
         trainable: Trainable[B] = eqx.combine(restored["parameters"], static)
-
-        # Restore the dataset iterator's state, making sure to grab the state from the
-        # correct process.
-        if len(restored["dataset"]) == jax.process_count():
-            try:
-                dataset.set_state(bytes(restored["dataset"][jax.process_index()]))
-            except ValueError:
-                logging.info(
-                    "Could not restore data loader state. This is probably because the "
-                    "number of workers has changed."
-                )
-        else:
-            logging.info(
-                "Cannot restore data loader state because the number of Jax processes "
-                "used to create the checkpoint differs from the current number of Jax "
-                "processes."
-            )
 
         return step, trainable, trainable.configure_optimizer(), restored["opt_state"]
 
