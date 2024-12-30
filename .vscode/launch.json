@@ -22,9 +22,6 @@
             "type": "debugpy",
             "request": "launch",
             "module": "main",
-            "args": [
-                "trainer.on_existing_workspace=overwrite",
-            ],
             "env": {
                 "WORKSPACE": "/tmp/workspace",
                 "JAX_DIST_ENABLED": "true",

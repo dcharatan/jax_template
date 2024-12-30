@@ -1,3 +1,4 @@
+import logging
 import shutil
 import signal
 import sys
@@ -15,7 +16,6 @@ import tensorflow as tf
 from grain.python import PyGrainDatasetIterator
 from jaxtyping import Array, Float, PRNGKeyArray
 from optax import GradientTransformation
-from tqdm import trange
 
 from .sharding import (
     filter_add_sharding_to_shape_dtype_struct,
@@ -24,6 +24,7 @@ from .sharding import (
     get_replicated_sharding,
     per_process_all_gather_bytes,
 )
+from .timer import Timer
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,7 @@ class CheckpointingCfg:
 @dataclass(frozen=True)
 class TrainerCfg:
     num_steps: int
+    log_every: int
     checkpointing: CheckpointingCfg
     on_existing_workspace: Literal["restore", "overwrite", "throw"]
 
@@ -101,7 +103,7 @@ class Trainer(Generic[B]):
         get_trainable: Callable[[], Trainable[B]],
         dataset: PyGrainDatasetIterator,
     ) -> None:
-        print("Entering training loop.")
+        logging.info("Entering training loop.")
         step, trainable, opt, opt_state = self.init_or_handle_existing_workspace(
             get_trainable,
             dataset,
@@ -112,7 +114,7 @@ class Trainer(Generic[B]):
 
         def preemption_handler(sig, frame):
             nonlocal preempted
-            print("Attempting to exit gracefully.")
+            logging.info("Attempting to exit gracefully.")
             preempted = True
 
         def exit_if_preempted():
@@ -120,7 +122,7 @@ class Trainer(Generic[B]):
                 # Save a checkpoint at the current step, then exit gracefully.
                 self.save(step, trainable, opt_state, dataset, force=True)
                 self.manager.wait_until_finished()
-                print("Exiting gracefully.")
+                logging.info("Exiting gracefully.")
                 sys.exit(0)
 
         signal.signal(signal.SIGINT, preemption_handler)
@@ -132,13 +134,8 @@ class Trainer(Generic[B]):
         trainable, opt_state = filter_device_put((trainable, opt_state), replicated)
 
         # Main training loop. Exit before long-running operations if preempted.
-        for step in trange(
-            step,
-            self.cfg.num_steps,
-            initial=step,
-            total=self.cfg.num_steps,
-            desc="Training",
-        ):
+        timer = Timer()
+        while step < self.cfg.num_steps:
             step_rng = jax.random.fold_in(rng, step)
 
             exit_if_preempted()
@@ -156,14 +153,21 @@ class Trainer(Generic[B]):
                 opt,
             )
 
+            # Log progress.
+            if step % self.cfg.log_every == 0:
+                rate = timer.get_rate(self.cfg.log_every)
+                logging.info(f"Step {step}; loss {loss.item():.5f}; {rate}")
+
             # Write the loss, but only from one process.
             exit_if_preempted()
             if jax.process_index() == 0:
                 with self.writer.as_default():
                     tf.summary.scalar("loss", loss.item(), step=step)
 
+            step += 1
+
         # Ensure that the checkpoint at step == num_steps isn't dropped.
-        self.save(step + 1, trainable, opt_state, dataset)
+        self.save(step, trainable, opt_state, dataset)
 
         # Wait for checkpoints to finish saving before returning.
         self.manager.wait_until_finished()
@@ -188,7 +192,7 @@ class Trainer(Generic[B]):
         # Avoid unnecessary work.
         if not (self.manager.should_save(step) or force):
             return
-        print(f"Saving checkpoint at step {step}.")
+        logging.info(f"Saving checkpoint at step {step}.")
 
         # Only save the trainable's parameters (not configuration dataclasses).
         parameters, _ = eqx.partition(trainable, eqx.is_array)
@@ -249,12 +253,12 @@ class Trainer(Generic[B]):
             try:
                 dataset.set_state(bytes(restored["dataset"][jax.process_index()]))
             except ValueError:
-                print(
+                logging.info(
                     "Could not restore data loader state. This is probably because the "
                     "number of workers has changed."
                 )
         else:
-            print(
+            logging.info(
                 "Cannot restore data loader state because the number of Jax processes "
                 "used to create the checkpoint differs from the current number of Jax "
                 "processes."
@@ -282,6 +286,11 @@ class Trainer(Generic[B]):
             except FileNotFoundError:
                 # This will fall through to regular initialization.
                 pass
+
+        # Avoid race conditions (e.g., creating the workspace in one process and then
+        # throwing because it exists from another process).
+        jax.experimental.multihost_utils.sync_global_devices("init")
+
         return 0, *self.init(get_trainable)
 
     def get_batch(self, dataset: PyGrainDatasetIterator) -> B:
