@@ -20,7 +20,7 @@
         "editor.defaultFormatter": "ms-python.black-formatter",
     },
     "debug.focusWindowOnBreak": false,
-    "python.defaultInterpreterPath": "~/environments/jax_forward_gradients/bin/python3",
+    "python.defaultInterpreterPath": "~/environments/generic/bin/python3",
     "files.watcherExclude": {
         "**/.git/objects/**": true,
         "**/.git/subtree-cache/**": true,
