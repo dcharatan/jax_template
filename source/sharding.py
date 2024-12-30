@@ -2,8 +2,6 @@ from typing import Any
 
 import equinox as eqx
 import jax
-import numpy as np
-from einops import repeat
 from jaxtyping import PyTree
 
 # Since we're only doing simple SPMD/data parallelism, we use this mesh everywhere.
