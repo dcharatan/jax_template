@@ -204,6 +204,7 @@ class Trainer(Generic[B]):
             opt_state=ocp.args.StandardSave(opt_state),
             dataset=ocp.args.StandardSave(dataset_state),
         )
+        self.manager.directory.mkdir(exist_ok=True, parents=True)
         self.manager.save(step, args=args, force=force)
 
     def restore(

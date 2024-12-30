@@ -7,7 +7,19 @@ from einops import repeat
 from jaxtyping import PyTree
 
 # Since we're only doing simple SPMD/data parallelism, we use this mesh everywhere.
-mesh = jax.sharding.Mesh(jax.devices(), ["batch"])
+MESH = jax.sharding.Mesh(jax.devices(), ["batch"])
+
+# Replicate on all axes.
+SHARDING_REPLICATED = jax.sharding.NamedSharding(
+    MESH,
+    jax.sharding.PartitionSpec(),
+)
+
+# Shard along the first axis.
+SHARDING_DISTRIBUTED = jax.sharding.NamedSharding(
+    MESH,
+    jax.sharding.PartitionSpec("batch"),
+)
 
 
 def filter_device_put(
@@ -37,40 +49,24 @@ def filter_add_sharding_to_shape_dtype_struct(
     return eqx.combine(structs, others)
 
 
-def get_ndim(x: Any) -> int | None:
-    if eqx.is_array(x) or isinstance(x, jax.ShapeDtypeStruct):
-        return x.ndim
-    return None
+def is_array_or_tracer(x: Any) -> bool:
+    return eqx.is_array(x) or isinstance(x, jax.ShapeDtypeStruct)
 
 
 def get_distributed_sharding(tree: PyTree) -> PyTree[jax.sharding.NamedSharding | None]:
-    """Create a sharding that shards along the first axis and replicates along all
-    other axes.
-    """
-
-    def _get_distributed_sharding(x: Any) -> jax.sharding.NamedSharding | None:
-        ndim = get_ndim(x)
-        if ndim is None:
-            return None
-        unsharded_axes = (None,) * (ndim - 1)
-        partition_spec = jax.sharding.PartitionSpec(*("batch", *unsharded_axes))
-        return jax.sharding.NamedSharding(mesh, partition_spec)
-
-    return jax.tree.map(_get_distributed_sharding, tree)
+    """Shard along the first axis and replicate along all other axes."""
+    return jax.tree.map(
+        lambda x: SHARDING_DISTRIBUTED if is_array_or_tracer(x) else None,
+        tree,
+    )
 
 
 def get_replicated_sharding(tree: PyTree) -> PyTree[jax.sharding.NamedSharding | None]:
-    """Create a sharding that replicates along all axes."""
-
-    def _get_replicated_sharding(x: Any) -> jax.sharding.NamedSharding | None:
-        ndim = get_ndim(x)
-        if ndim is None:
-            return None
-        unsharded_axes = (None,) * ndim
-        partition_spec = jax.sharding.PartitionSpec(*unsharded_axes)
-        return jax.sharding.NamedSharding(mesh, partition_spec)
-
-    return jax.tree.map(_get_replicated_sharding, tree)
+    """Replicate along all axes."""
+    return jax.tree.map(
+        lambda x: SHARDING_REPLICATED if is_array_or_tracer(x) else None,
+        tree,
+    )
 
 
 def per_process_all_gather_bytes(x: bytes) -> list[bytes]:
