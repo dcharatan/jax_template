@@ -17,7 +17,7 @@ from grain.python import (
     PyGrainCheckpointSave,
     PyGrainDatasetIterator,
 )
-from jaxtyping import Array, Float, PRNGKeyArray
+from jaxtyping import Array, Float, PRNGKeyArray, PyTree
 from optax import GradientTransformation
 
 from .sharding import (
@@ -27,6 +27,8 @@ from .sharding import (
     get_replicated_sharding,
 )
 from .timer import Timer
+
+OptState = PyTree
 
 
 @dataclass(frozen=True)
@@ -68,11 +70,11 @@ def compute_loss(
 @eqx.filter_jit(donate="all")
 def train_step(
     trainable: Trainable[B],
-    opt_state: optax.OptState,
+    opt_state: OptState,
     batch: B,
     rng: PRNGKeyArray,
     opt: optax.GradientTransformation,
-) -> tuple[Trainable[B], optax.OptState, Float[Array, ""]]:
+) -> tuple[Trainable[B], OptState, Float[Array, ""]]:
     loss, grads = eqx.filter_value_and_grad(compute_loss)(trainable, batch, rng)
     updates, opt_state = opt.update(grads, opt_state)
     trainable = eqx.apply_updates(trainable, updates)
@@ -87,7 +89,6 @@ class Trainer(Generic[B]):
     ) -> None:
         self.cfg = cfg
         self.workspace = workspace
-        self.writer = tf.summary.create_file_writer(str(workspace / "tensorboard"))
 
         # Set up the checkpoint manager.
         options = ocp.CheckpointManagerOptions(
@@ -139,6 +140,7 @@ class Trainer(Generic[B]):
         trainable, opt_state = filter_device_put((trainable, opt_state), replicated)
 
         # Main training loop. Exit before long-running operations if preempted.
+        writer = tf.summary.create_file_writer(str(self.workspace / "tensorboard"))
         timer = Timer()
         while step < self.cfg.num_steps:
             step_rng = jax.random.fold_in(rng, step)
@@ -166,7 +168,7 @@ class Trainer(Generic[B]):
             # Write the loss, but only from one process.
             exit_if_preempted()
             if jax.process_index() == 0:
-                with self.writer.as_default():
+                with writer.as_default():
                     tf.summary.scalar("loss", loss.item(), step=step)
 
             step += 1
@@ -180,7 +182,7 @@ class Trainer(Generic[B]):
     def init(
         self,
         get_trainable: Callable[[], Trainable[B]],
-    ) -> tuple[Trainable[B], optax.GradientTransformation, optax.OptState]:
+    ) -> tuple[Trainable[B], optax.GradientTransformation, OptState]:
         trainable = get_trainable()
         opt = trainable.configure_optimizer()
         opt_state = opt.init(eqx.filter(trainable, eqx.is_inexact_array))
@@ -190,7 +192,7 @@ class Trainer(Generic[B]):
         self,
         step: int,
         trainable: Trainable[B],
-        opt_state: optax.OptState,
+        opt_state: OptState,
         dataset: PyGrainDatasetIterator,
         force: bool = False,
     ) -> None:
@@ -214,7 +216,7 @@ class Trainer(Generic[B]):
         step: int | None,
         get_trainable: Callable[[], Trainable[B]],
         dataset: PyGrainDatasetIterator,
-    ) -> tuple[int, Trainable[B], optax.GradientTransformation, optax.OptState]:
+    ) -> tuple[int, Trainable[B], optax.GradientTransformation, OptState]:
         if step is None:
             step = self.manager.latest_step()
 
@@ -254,7 +256,7 @@ class Trainer(Generic[B]):
         self,
         get_trainable: Callable[[], Trainable[B]],
         dataset: PyGrainDatasetIterator,
-    ) -> tuple[int, Trainable[B], optax.GradientTransformation, optax.OptState]:
+    ) -> tuple[int, Trainable[B], optax.GradientTransformation, OptState]:
         """Based on self.cfg.on_existing_workspace, handle initialization."""
         if self.cfg.on_existing_workspace == "throw" and self.workspace.exists():
             # In "throw" mode, throw an exception if the workspace already exists.
