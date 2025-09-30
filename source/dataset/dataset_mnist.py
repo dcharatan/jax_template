@@ -13,16 +13,17 @@ class DatasetMnistCfg:
     name: Literal["mnist"]
 
 
+class Convert(MapTransform):
+    def map(self, element):
+        return {
+            "rgb": repeat(element["image"] / 255, "h w () -> c h w", c=3),
+            "label": element["label"],
+        }
+
+
 class DatasetMnist(Dataset[DatasetMnistCfg]):
     def get_data_source(self) -> RandomAccessDataSource[Any]:
         return tfds.data_source("mnist", split="train")
 
     def get_transformations(self) -> Transformations:
-        class Convert(MapTransform):
-            def map(self, element):
-                return {
-                    "rgb": repeat(element["image"] / 255, "h w () -> c h w", c=3),
-                    "label": element["label"],
-                }
-
         return [Convert()]
