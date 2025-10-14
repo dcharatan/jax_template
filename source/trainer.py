@@ -126,6 +126,7 @@ class Trainer(Generic[B]):
         def exit_if_preempted():
             if preempted:
                 # Save a checkpoint at the current step, then exit gracefully.
+                logging.info("Detected preemption. Attempting to save checkpoint.")
                 self.save(step, trainable, opt_state, dataset, force=True)
                 self.manager.wait_until_finished()
                 logging.info("Exiting gracefully.")
