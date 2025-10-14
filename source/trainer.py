@@ -129,7 +129,9 @@ class Trainer(Generic[B]):
                 self.save(step, trainable, opt_state, dataset, force=True)
                 self.manager.wait_until_finished()
                 logging.info("Exiting gracefully.")
-                sys.exit(0)
+
+                # Exit with a special code to indicate preemption.
+                sys.exit(99)
 
         signal.signal(signal.SIGINT, preemption_handler)
         signal.signal(signal.SIGTERM, preemption_handler)
