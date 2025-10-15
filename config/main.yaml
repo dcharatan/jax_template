@@ -14,7 +14,7 @@ trainer:
   log_every: 100
   on_existing_workspace: restore
   checkpointing:
-    save_interval_steps: 1000
+    save_interval_steps: 50_000
     max_to_keep: 3
     load_dataset_state: false
 
