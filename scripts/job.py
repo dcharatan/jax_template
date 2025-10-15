@@ -116,7 +116,7 @@ def submit_job(
     latest_run.unlink(missing_ok=True)
     latest_run.symlink_to(job_dir, target_is_directory=True)
 
-    # Pull the repos.
+    # Pull the repo.
     message(f"Cloning code from branch {branch}.")
     code_dir = code_dir / "code"
     os.system(
@@ -146,10 +146,6 @@ def submit_job(
         message("Copying checkpoint.")
         shutil.copytree(checkpoint, checkpoint_dir / Path(checkpoint).name)
 
-    cuda_cache_dir = job_dir / "cuda_cache"
-    cuda_cache_dir.mkdir(parents=True, exist_ok=True)
-    torch_extensions_cache_dir = job_dir / ".cache/torch_extensions"
-    torch_extensions_cache_dir.mkdir(parents=True, exist_ok=True)
     slurm_file = f"""#!/bin/bash
 #SBATCH -J {job_name}
 #SBATCH -o {job_dir}/out.txt
@@ -166,18 +162,27 @@ def submit_job(
 #SBATCH --qos={qos}
 #SBATCH --account vision-sitzmann
 #SBATCH --time={time}
-#SBATCH --signal=SIGTERM@30
+#SBATCH --signal=B:SIGUSR1@60
 #SBATCH --requeue
 
 source /data/scene-rep/u/{USERNAME}/miniconda3/etc/profile.d/conda.sh
 cd {code_dir.resolve()}
 conda activate {ENVIRONMENT_NAME}
 
-export CUDA_CACHE_PATH={cuda_cache_dir.resolve()}
-export TORCH_EXTENSIONS_DIR={torch_extensions_cache_dir.resolve()}
 export WORKSPACE={workspace_dir.resolve()}
 
-{script}
+handle_timeout() {{
+    kill -TERM $SCRIPT_PID 2>/dev/null
+    wait $SCRIPT_PID
+    scontrol requeue $SLURM_JOB_ID
+    exit 99
+}}
+
+trap handle_timeout SIGUSR1
+
+{script} &
+SCRIPT_PID=$!
+wait $SCRIPT_PID
 """  # noqa: E501
 
     slurm_script_path = job_dir / "job.slurm"
