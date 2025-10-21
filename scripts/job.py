@@ -208,7 +208,7 @@ if __name__ == "__main__":
         branch=os.environ.get("BRANCH", DEFAULT_BRANCH),
         commit_sha=os.environ.get("COMMIT_SHA", DEFAULT_COMMIT_SHA),
         checkpoint=os.environ.get("CHECKPOINT", DEFAULT_CHECKPOINT),
-        partitions=os.environ.get("PARITITONS", DEFAULT_PARTITIONS),
+        partitions=os.environ.get("PARTITIONS", DEFAULT_PARTITIONS),
         qos=os.environ.get("QOS", DEFAULT_QOS),
         num_gpus=int(os.environ.get("NUM_GPUS", DEFAULT_NUM_GPUS)),
         memory=int(os.environ.get("MEMORY", DEFAULT_MEMORY)),
