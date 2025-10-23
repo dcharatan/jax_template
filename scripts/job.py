@@ -118,7 +118,6 @@ def submit_job(
 
     # Pull the repo.
     message(f"Cloning code from branch {branch}.")
-    code_dir = code_dir / "code"
     os.system(
         "git clone --depth 1 --single-branch --no-tags "
         f"--branch {branch} git@github.com:dcharatan/jax_template.git "
