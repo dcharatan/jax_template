@@ -4,6 +4,7 @@ from pathlib import Path
 
 import hydra
 from dacite import Config, from_dict
+from omegaconf import OmegaConf
 
 from .dataset import DataLoaderCfg, DatasetCfg
 from .trainable import TrainableCfg
@@ -25,4 +26,4 @@ def get_typed_config() -> RootCfg:
         cfg = hydra.compose(config_name="main", overrides=sys.argv[1:])
 
     # Convert the configuration to a nested dataclass.
-    return from_dict(RootCfg, cfg, Config(cast=[Path]))
+    return from_dict(RootCfg, OmegaConf.to_container(cfg), Config(cast=[Path, tuple]))
